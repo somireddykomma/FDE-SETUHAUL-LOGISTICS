@@ -17,6 +17,7 @@ from app.errors import (
     HoldMismatch,
     HoldNotActive,
     HoldNotFound,
+    ImplausibleEta,
     ShipmentAmbiguous,
     ShipmentNotFound,
     SlotNotFound,
@@ -32,6 +33,30 @@ ACTIVE_APPOINTMENT_STATUSES = ("PENDING_CONFIRMATION", "CONFIRMED", "IN_PROGRESS
 
 def now_iso() -> str:
     return datetime.now(IST).strftime("%Y-%m-%dT%H:%M:%S+05:30")
+
+
+def _validate_eta_plausibility(original_eta_ts: str, declared_eta_ts: str, shipment_id: str) -> None:
+    """Catch LLM date-arithmetic slips (wrong month/day/year) before they
+    corrupt the shipment record. A real delay is hours, occasionally a day or
+    two -- never months. Everything in this dataset is single-day trucking
+    operations, so a declared ETA more than a few days from the shipment's
+    original ETA is essentially always a bad date, not a real delay.
+    """
+    try:
+        original = datetime.fromisoformat(original_eta_ts)
+        declared = datetime.fromisoformat(declared_eta_ts)
+    except ValueError as exc:
+        raise ImplausibleEta(
+            f"declared_eta_ts '{declared_eta_ts}' is not a valid ISO-8601 timestamp"
+        ) from exc
+    delta = declared - original
+    if abs(delta) > timedelta(days=3):
+        raise ImplausibleEta(
+            f"declared_eta_ts {declared_eta_ts} is {delta} away from {shipment_id}'s original ETA "
+            f"{original_eta_ts} -- that's not a plausible delay. Re-check the DATE (not just the "
+            f"time-of-day): reuse the year/month/day from the shipment's own timestamps, don't "
+            f"substitute today's real-world calendar date."
+        )
 
 
 def _expire_stale_holds(conn: sqlite3.Connection, now: str) -> None:
@@ -165,11 +190,12 @@ def record_eta_update(
     reported_by_driver_id: str | None = None,
 ) -> dict:
     with transaction(conn) as c:
-        exists = c.execute(
-            "SELECT 1 FROM shipments WHERE shipment_id = ?", (shipment_id,)
+        shipment = c.execute(
+            "SELECT original_eta_ts FROM shipments WHERE shipment_id = ?", (shipment_id,)
         ).fetchone()
-        if exists is None:
+        if shipment is None:
             raise ShipmentNotFound(shipment_id)
+        _validate_eta_plausibility(shipment["original_eta_ts"], declared_eta_ts, shipment_id)
 
         eta_update_id = new_id("ETA")
         created_at = now_iso()

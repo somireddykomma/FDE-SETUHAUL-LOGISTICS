@@ -41,3 +41,9 @@ class AppointmentConflict(ServiceError):
 
 class ThreadNotFound(ServiceError):
     pass
+
+
+class ImplausibleEta(ServiceError):
+    """declared_eta_ts is too far from the shipment's known timeline to be a
+    real delay estimate -- almost always a date-arithmetic slip (wrong month/
+    day/year) rather than an actual multi-week delay."""

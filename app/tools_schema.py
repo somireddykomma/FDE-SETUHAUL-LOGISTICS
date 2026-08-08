@@ -55,7 +55,11 @@ TOOLS = [
                 "driver reports a delay or corrects a previous estimate. declared_eta_ts must be a "
                 "full ISO-8601 timestamp with +05:30 offset, e.g. 2026-08-04T19:10:00+05:30 -- "
                 "compute it from the shipment's current context plus the delay the driver described; "
-                "do not ask the driver to produce ISO timestamps themselves."
+                "do not ask the driver to produce ISO timestamps themselves. IMPORTANT: reuse the "
+                "year-month-day from the shipment's own original_eta_ts/latest_eta_ts (already in this "
+                "conversation from list_active_shipments/get_shipment_context) and only adjust the "
+                "time-of-day by the stated delay -- do NOT substitute today's real-world calendar date, "
+                "that will produce a nonsense ETA months away from the shipment's actual timeline."
             ),
             "parameters": {
                 "type": "object",
