@@ -64,6 +64,40 @@ def get_driver_active_shipments(conn: sqlite3.Connection, driver_id: str) -> lis
     return [dict(r) for r in rows]
 
 
+def get_driver_thread_history(conn: sqlite3.Connection, driver_id: str) -> dict:
+    """Read-only lookup for the UI: the driver's most recent thread (any
+    status) plus its full message log, newest thread first. Does not create
+    a thread -- that only happens on an inbound chat message.
+    """
+    thread = conn.execute(
+        """
+        SELECT thread_id, thread_status, shipment_id, opened_at
+        FROM chat_threads
+        WHERE driver_id = ?
+        ORDER BY opened_at DESC LIMIT 1
+        """,
+        (driver_id,),
+    ).fetchone()
+    if thread is None:
+        return {"thread_id": None, "thread_status": None, "shipment_id": None, "messages": []}
+
+    rows = conn.execute(
+        """
+        SELECT sender_type, message_text, message_ts
+        FROM chat_messages
+        WHERE thread_id = ?
+        ORDER BY message_ts ASC
+        """,
+        (thread["thread_id"],),
+    ).fetchall()
+    return {
+        "thread_id": thread["thread_id"],
+        "thread_status": thread["thread_status"],
+        "shipment_id": thread["shipment_id"],
+        "messages": [dict(r) for r in rows],
+    }
+
+
 def resolve_shipment_for_driver(conn: sqlite3.Connection, driver_id: str, shipment_id: str | None) -> str:
     """Disambiguation gate described in the implementation guide section 5.1.
 

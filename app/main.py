@@ -1,9 +1,14 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.db import get_connection
 
 app = FastAPI(title="SetuHaul Driver Chat")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class ChatRequest(BaseModel):
@@ -36,3 +41,19 @@ def chat(req: ChatRequest):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/chat/history/{driver_id}")
+def chat_history(driver_id: str):
+    from app import service as svc
+
+    conn = get_connection()
+    try:
+        return svc.get_driver_thread_history(conn, driver_id)
+    finally:
+        conn.close()
+
+
+# Serves app/static/index.html at "/" and any other files in that directory.
+# Mounted last so it never shadows the API routes above.
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
