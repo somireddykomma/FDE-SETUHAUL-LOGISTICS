@@ -83,17 +83,20 @@ def _get_or_create_thread(conn: sqlite3.Connection, driver_id: str) -> str:
 
 
 def _load_history(conn: sqlite3.Connection, thread_id: str, limit: int = 20) -> list[dict]:
+    # Take the most recent `limit` messages (DESC + LIMIT), then re-sort
+    # ascending -- a plain ASC + LIMIT would keep the oldest messages forever
+    # and never include new ones once a thread passes `limit` messages.
     rows = conn.execute(
         """
-        SELECT sender_type, message_text FROM chat_messages
+        SELECT sender_type, message_text, message_ts FROM chat_messages
         WHERE thread_id = ? AND sender_type IN ('DRIVER','AGENT')
-        ORDER BY message_ts ASC
+        ORDER BY message_ts DESC
         LIMIT ?
         """,
         (thread_id, limit),
     ).fetchall()
     role_map = {"DRIVER": "user", "AGENT": "assistant"}
-    return [{"role": role_map[r["sender_type"]], "content": r["message_text"]} for r in rows]
+    return [{"role": role_map[r["sender_type"]], "content": r["message_text"]} for r in reversed(rows)]
 
 
 def _save_message(conn: sqlite3.Connection, thread_id: str, sender_type: str, text: str) -> None:
