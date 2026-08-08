@@ -49,15 +49,27 @@ def _expire_stale_holds(conn: sqlite3.Connection, now: str) -> None:
 # Identity / context
 # ---------------------------------------------------------------------------
 
+def get_driver_profile(conn: sqlite3.Connection, driver_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT driver_id, driver_name, driver_status, home_base_city FROM drivers WHERE driver_id = ?",
+        (driver_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_driver_active_shipments(conn: sqlite3.Connection, driver_id: str) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT shipment_id, order_reference, destination_facility_id,
-               current_status, priority_code, original_eta_ts, latest_eta_ts
-        FROM shipments
-        WHERE driver_id = ?
-          AND current_status NOT IN ('COMPLETED', 'CANCELLED')
-        ORDER BY original_eta_ts
+        SELECT s.shipment_id, s.order_reference, s.destination_facility_id,
+               f.facility_name AS destination_facility_name, f.city AS destination_city,
+               s.current_status, s.priority_code, s.original_eta_ts, s.latest_eta_ts,
+               veh.registration_number AS vehicle_registration_number
+        FROM shipments s
+        LEFT JOIN facilities f ON f.facility_id = s.destination_facility_id
+        LEFT JOIN vehicles veh ON veh.vehicle_id = s.vehicle_id
+        WHERE s.driver_id = ?
+          AND s.current_status NOT IN ('COMPLETED', 'CANCELLED')
+        ORDER BY s.original_eta_ts
         """,
         (driver_id,),
     ).fetchall()

@@ -175,6 +175,25 @@
     font-size: 12px;
   }
   .error-banner.show { display: block; }
+  .chips {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 16px 12px;
+    flex-shrink: 0;
+  }
+  .chips.show { display: flex; }
+  .chip {
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -187,6 +206,12 @@
     <div id="escalatedBanner" class="escalated-banner">This conversation has been escalated to a human coordinator.</div>
     <div id="errorBanner" class="error-banner"></div>
     <div id="log"></div>
+    <div id="chips" class="chips">
+      <button type="button" class="chip" data-text="My vehicle broke down">🔧 Vehicle breakdown</button>
+      <button type="button" class="chip" data-text="I'm stuck in traffic and running late">🚦 Stuck in traffic</button>
+      <button type="button" class="chip" data-text="I've been in an accident">⚠️ Accident</button>
+      <button type="button" class="chip" data-text="Something else">💬 Something else</button>
+    </div>
     <form id="composer">
       <textarea id="msg" rows="1" placeholder="Type a message..." autocomplete="off"></textarea>
       <button id="send" type="submit">Send</button>
@@ -201,6 +226,9 @@ const sendBtn = document.getElementById('send');
 const escalatedBanner = document.getElementById('escalatedBanner');
 const errorBanner = document.getElementById('errorBanner');
 const form = document.getElementById('composer');
+const chipsEl = document.getElementById('chips');
+
+let driverMessageCount = 0;
 
 const SENDER_ROW_CLASS = { DRIVER: 'driver', AGENT: 'agent', SYSTEM: 'system', OPERATIONS: 'system', WAREHOUSE: 'system' };
 
@@ -249,12 +277,32 @@ function setEscalated(isEscalated) {
   escalatedBanner.classList.toggle('show', !!isEscalated);
 }
 
+// Quick-reply chips ("vehicle breakdown", "stuck in traffic", ...) only make
+// sense right after the assistant's opening greeting, i.e. the driver has
+// sent exactly one message (whatever kicked off the thread) and the bot's
+// reply to it is the most recent message. Once the driver replies again,
+// hide them for the rest of the thread so they don't clutter things.
+function updateChipsVisibility(lastSender) {
+  const show = driverMessageCount === 1 && lastSender === 'AGENT';
+  chipsEl.classList.toggle('show', show);
+}
+
+chipsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.chip');
+  if (!btn) return;
+  msgEl.value = btn.dataset.text;
+  chipsEl.classList.remove('show');
+  form.requestSubmit();
+});
+
 function currentDriverId() {
   return driverIdEl.value.trim();
 }
 
 async function loadHistory(driverId) {
   logEl.innerHTML = '';
+  chipsEl.classList.remove('show');
+  driverMessageCount = 0;
   if (!driverId) { renderEmptyState(); setEscalated(false); return; }
   try {
     const res = await fetch(`/chat/history/${encodeURIComponent(driverId)}`);
@@ -264,6 +312,9 @@ async function loadHistory(driverId) {
       renderEmptyState();
     } else {
       data.messages.forEach(m => addMessage(m.sender_type, m.message_text));
+      driverMessageCount = data.messages.filter(m => m.sender_type === 'DRIVER').length;
+      const lastSender = data.messages[data.messages.length - 1].sender_type;
+      updateChipsVisibility(lastSender);
     }
     setEscalated(data.thread_status === 'ESCALATED');
   } catch (e) {
@@ -287,6 +338,8 @@ form.addEventListener('submit', async (e) => {
 
   clearError();
   addMessage('DRIVER', text);
+  driverMessageCount += 1;
+  chipsEl.classList.remove('show');
   msgEl.value = '';
   msgEl.style.height = 'auto';
   sendBtn.disabled = true;
@@ -307,6 +360,7 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
     addMessage('AGENT', data.reply);
     setEscalated(data.escalated);
+    updateChipsVisibility('AGENT');
   } catch (err) {
     removeTypingIndicator();
     showError('Network error -- is the server running?');

@@ -21,9 +21,12 @@ TOOLS = [
         "function": {
             "name": "list_active_shipments",
             "description": (
-                "List the current driver's active (non-completed, non-cancelled) shipments. "
-                "Call this first whenever it is unclear which shipment a message refers to, "
-                "or when the driver has not yet been connected to a specific shipment in this thread."
+                "Get the current driver's profile (name) plus their active (non-completed, "
+                "non-cancelled) shipments, each with destination facility name/city, vehicle "
+                "registration number, and latest ETA. Call this first in every new thread -- before "
+                "asking or answering anything else -- so you can open with a real, grounded summary "
+                "of who the driver is and what they're hauling, and whenever it's unclear which "
+                "shipment a later message refers to."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -185,7 +188,10 @@ def call_tool(conn: sqlite3.Connection, driver_id: str, thread_id: str, name: st
     """
     try:
         if name == "list_active_shipments":
-            return {"shipments": svc.get_driver_active_shipments(conn, driver_id)}
+            return {
+                "driver": svc.get_driver_profile(conn, driver_id),
+                "shipments": svc.get_driver_active_shipments(conn, driver_id),
+            }
 
         if name == "get_shipment_context":
             return svc.get_shipment_context(conn, arguments["shipment_id"])
