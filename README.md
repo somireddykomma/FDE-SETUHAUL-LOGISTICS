@@ -13,8 +13,9 @@ touches the database directly.
   a different Python version)
 - An [OpenRouter](https://openrouter.ai/) API key
 - The seeded SQLite database at `data/setuhaul_freight_operations.db`
-  (gitignored — it contains sample operational data, not schema-only.
-  Copy it in from wherever the project data lives before running.)
+  is committed to this repo. It's synthetic demo/seed data (fake
+  drivers, shipments, facilities) generated for this assignment —
+  not real operational data.
 
 ## Setup
 
@@ -47,15 +48,10 @@ touches the database directly.
    slug is still live there before relying on it, model availability
    changes over time.
 
-3. **Make sure the database is in place**:
-
-   ```
-   data/setuhaul_freight_operations.db
-   ```
-
-   `data/migration_001_holds_and_idempotency.sql` is included in the
-   repo; apply it against the base schema if you're building the DB
-   from scratch rather than copying a pre-seeded file.
+3. The database is already at `data/setuhaul_freight_operations.db` —
+   nothing to do here for local dev.
+   `data/migration_001_holds_and_idempotency.sql` documents the
+   holds/idempotency schema addition already applied to that file.
 
 ## Running the service
 
@@ -71,7 +67,14 @@ curl http://127.0.0.1:8000/health
 # {"status":"ok"}
 ```
 
-## Talking to the chatbot
+## Chat UI
+
+Open `http://127.0.0.1:8000/` in a browser for a simple chat page
+(`app/static/index.html`). Enter a driver ID, send messages, and it
+restores conversation history on reload via `GET
+/chat/history/{driver_id}`.
+
+## Talking to the chatbot (API)
 
 ```bash
 curl -X POST http://127.0.0.1:8000/chat \
@@ -103,20 +106,55 @@ pytest -q
 Tests run against a private copy of the seeded DB (see
 `tests/conftest.py`) so they never mutate your working `data/*.db`.
 
+## Deploying (Render)
+
+`render.yaml` defines a free web service so every driver can reach
+the same instance from their own device.
+
+1. In the [Render dashboard](https://dashboard.render.com/), **New +**
+   → **Blueprint**, and point it at this GitHub repo. Render reads
+   `render.yaml` and creates the service automatically.
+2. When prompted for `OPENROUTER_API_KEY` (marked `sync: false` in
+   the blueprint so it's never stored in git), paste your real key.
+   `OPENROUTER_BASE_URL` and `OPENROUTER_MODEL` are already set.
+3. Deploy. Render runs `pip install -r requirements.txt` then
+   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, and gives you
+   a public URL like `https://setuhaul-driver-chat.onrender.com` —
+   share that with drivers; concurrent access from multiple devices
+   works out of the box (FastAPI handles concurrent requests, and
+   `app/service.py` uses `BEGIN IMMEDIATE` transactions so two
+   drivers racing for the same dock slot resolve safely instead of
+   double-booking).
+
+**Free-tier caveats, both expected for a demo deployment:**
+- The instance spins down after ~15 minutes idle and cold-starts on
+  the next request (a few seconds' delay).
+- Local disk is ephemeral — a redeploy or a cold start after a long
+  idle period resets `data/setuhaul_freight_operations.db` back to
+  its committed seed state, discarding any bookings/holds/ETA
+  updates made in between. Fine for demoing; if this needs to hold
+  real, durable bookings later, move to a host with a persistent
+  volume (e.g. Fly.io) or an external database.
+- No authentication exists on `/chat` — anyone with a `driver_id` can
+  chat as that driver. Fine for an internal demo link, not for a
+  public production rollout.
+
 ## Project layout
 
 ```
 app/
-  main.py          FastAPI app, /chat and /health routes
+  main.py          FastAPI app: /chat, /chat/history, /health routes; serves app/static/
   agent.py         Conversation loop: LLM + tool calls, system prompt
   tools_schema.py  Tool (function-calling) schemas + dispatcher to app/service.py
   service.py       Transaction-safe business logic (the only DB writer)
   db.py            SQLite connection/transaction helpers
   config.py        Loads OPENROUTER_* from .env
+  static/index.html  Browser chat UI
   errors.py, ids.py
 data/
-  setuhaul_freight_operations.db          seeded DB (gitignored)
+  setuhaul_freight_operations.db          seeded DB (synthetic demo data)
   migration_001_holds_and_idempotency.sql holds/idempotency schema addition
 tests/
   test_concurrency.py   race-condition coverage for slot booking
+render.yaml          Render Blueprint (see Deploying section)
 ```
