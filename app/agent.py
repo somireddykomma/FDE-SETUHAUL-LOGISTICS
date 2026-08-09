@@ -146,7 +146,19 @@ def _save_message(conn: sqlite3.Connection, thread_id: str, sender_type: str, te
 
 
 def _maybe_link_shipment(conn: sqlite3.Connection, thread_id: str, shipment_id: str | None) -> None:
+    """Best-effort only. shipment_id here comes straight from a tool call's
+    arguments -- it might be a hallucinated or malformed ID (e.g. the model
+    confusing an order_reference like "ORD-260804-004" for a shipment_id) that
+    a downstream tool call already rejected. Silently skip rather than crash
+    the whole turn on a FOREIGN KEY violation over what's just a convenience
+    link, not a fact the driver was told.
+    """
     if not shipment_id:
+        return
+    exists = conn.execute(
+        "SELECT 1 FROM shipments WHERE shipment_id = ?", (shipment_id,)
+    ).fetchone()
+    if not exists:
         return
     conn.execute(
         "UPDATE chat_threads SET shipment_id = ? WHERE thread_id = ? AND shipment_id IS NULL",
