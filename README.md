@@ -70,9 +70,11 @@ curl http://127.0.0.1:8000/health
 ## Chat UI
 
 Open `http://127.0.0.1:8000/` in a browser for a simple chat page
-(`app/static/index.html`). Enter a driver ID, send messages, and it
-restores conversation history on reload via `GET
-/chat/history/{driver_id}`.
+(`app/static/index.html`). The bot asks for your driver ID as the
+first conversational step (client-side parsed, e.g. "DRV001", "drv5")
+before calling the backend at all; once identified it's remembered in
+`localStorage` and restores conversation history on reload via `GET
+/chat/history/{driver_id}` ("Switch driver" in the header resets it).
 
 ## Talking to the chatbot (API)
 
