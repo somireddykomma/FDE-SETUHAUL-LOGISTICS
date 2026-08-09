@@ -184,14 +184,13 @@
     font-size: 12px;
   }
   .error-banner.show { display: block; }
-  .chips {
-    display: none;
+  .chips-inline {
+    display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 0 16px 12px;
-    flex-shrink: 0;
+    max-width: 78%;
+    margin-top: 2px;
   }
-  .chips.show { display: flex; }
   .chip {
     padding: 8px 14px;
     border-radius: 999px;
@@ -216,14 +215,6 @@
     <div id="escalatedBanner" class="escalated-banner">This conversation has been escalated to a human coordinator.</div>
     <div id="errorBanner" class="error-banner"></div>
     <div id="log"></div>
-    <div id="chips" class="chips">
-      <button type="button" class="chip" data-text="Please continue in English">English</button>
-      <button type="button" class="chip" data-text="हिंदी में बात करें">हिंदी</button>
-      <button type="button" class="chip" data-text="My vehicle broke down">🔧 Vehicle breakdown</button>
-      <button type="button" class="chip" data-text="I'm stuck in traffic and running late">🚦 Stuck in traffic</button>
-      <button type="button" class="chip" data-text="I've been in an accident">⚠️ Accident</button>
-      <button type="button" class="chip" data-text="Something else">💬 Something else</button>
-    </div>
     <form id="composer">
       <textarea id="msg" rows="1" placeholder="Type a message..." autocomplete="off"></textarea>
       <button id="send" type="submit">Send</button>
@@ -239,12 +230,26 @@ const sendBtn = document.getElementById('send');
 const escalatedBanner = document.getElementById('escalatedBanner');
 const errorBanner = document.getElementById('errorBanner');
 const form = document.getElementById('composer');
-const chipsEl = document.getElementById('chips');
 
 let driverId = localStorage.getItem('setuhaul_driver_id') || null;
 let driverMessageCount = 0;
 
 const SENDER_ROW_CLASS = { DRIVER: 'driver', AGENT: 'agent', SYSTEM: 'system', OPERATIONS: 'system', WAREHOUSE: 'system' };
+
+// Two distinct chip sets, shown inline under the specific bot message they
+// answer -- language first (the bot's opening message asks only this), then
+// issue chips under the bot's second message (the grounded greeting that
+// asks what's going on). Never both at once, never pinned to the composer.
+const LANGUAGE_CHIPS = [
+  { label: 'English', text: 'Please continue in English' },
+  { label: 'हिंदी', text: 'हिंदी में बात करें' },
+];
+const ISSUE_CHIPS = [
+  { label: '🔧 Vehicle breakdown', text: 'My vehicle broke down' },
+  { label: '🚦 Stuck in traffic', text: "I'm stuck in traffic and running late" },
+  { label: '⚠️ Accident', text: "I've been in an accident" },
+  { label: '💬 Something else', text: 'Something else' },
+];
 
 function showError(text) {
   errorBanner.textContent = text;
@@ -302,22 +307,38 @@ function updateDriverBadge() {
   }
 }
 
-// Quick-reply chips ("vehicle breakdown", "stuck in traffic", ...) only make
-// sense right after the assistant's opening greeting, i.e. the driver has
-// sent exactly one real message to the backend and the bot's reply to it is
-// the most recent message. Once the driver replies again, hide them.
-function updateChipsVisibility(lastSender) {
-  const show = driverMessageCount === 1 && lastSender === 'AGENT';
-  chipsEl.classList.toggle('show', show);
+function removeInlineChips() {
+  logEl.querySelector('.chips-inline')?.remove();
 }
 
-chipsEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('.chip');
-  if (!btn) return;
-  msgEl.value = btn.dataset.text;
-  chipsEl.classList.remove('show');
-  form.requestSubmit();
-});
+function addInlineChips(afterRow, chips) {
+  removeInlineChips();
+  const row = document.createElement('div');
+  row.className = 'chips-inline';
+  chips.forEach(c => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip';
+    btn.textContent = c.label;
+    btn.addEventListener('click', () => {
+      removeInlineChips();
+      msgEl.value = c.text;
+      form.requestSubmit();
+    });
+    row.appendChild(btn);
+  });
+  afterRow.insertAdjacentElement('afterend', row);
+  scrollToBottom();
+}
+
+// The bot's opening message (turn 1) only asks language; its second message
+// (turn 2) is the grounded greeting asking what's going on. Map that onto
+// driverMessageCount so the right chip set lands under the right bubble.
+function attachChipsForTurn(row, lastSender) {
+  if (lastSender !== 'AGENT') return;
+  if (driverMessageCount === 1) addInlineChips(row, LANGUAGE_CHIPS);
+  else if (driverMessageCount === 2) addInlineChips(row, ISSUE_CHIPS);
+}
 
 // Matches "DRV001", "drv1", "DRV 12", etc. and normalizes to the DRV0xx
 // format the backend's seed data uses -- this is a pure client-side parse,
@@ -335,7 +356,6 @@ function showIdGateGreeting() {
 
 async function loadHistory() {
   logEl.innerHTML = '';
-  chipsEl.classList.remove('show');
   driverMessageCount = 0;
   try {
     const res = await fetch(`/chat/history/${encodeURIComponent(driverId)}`);
@@ -344,10 +364,11 @@ async function loadHistory() {
     if (!data.messages || data.messages.length === 0) {
       renderEmptyState('Say hi to get started.');
     } else {
-      data.messages.forEach(m => addMessage(m.sender_type, m.message_text));
+      let lastRow = null;
+      data.messages.forEach(m => { lastRow = addMessage(m.sender_type, m.message_text); });
       driverMessageCount = data.messages.filter(m => m.sender_type === 'DRIVER').length;
       const lastSender = data.messages[data.messages.length - 1].sender_type;
-      updateChipsVisibility(lastSender);
+      attachChipsForTurn(lastRow, lastSender);
     }
     setEscalated(data.thread_status === 'ESCALATED');
   } catch (e) {
@@ -357,7 +378,6 @@ async function loadHistory() {
 
 async function sendToBackend(text) {
   driverMessageCount += 1;
-  chipsEl.classList.remove('show');
   sendBtn.disabled = true;
   addTypingIndicator();
 
@@ -374,9 +394,9 @@ async function sendToBackend(text) {
       return;
     }
     const data = await res.json();
-    addMessage('AGENT', data.reply);
+    const row = addMessage('AGENT', data.reply);
     setEscalated(data.escalated);
-    updateChipsVisibility('AGENT');
+    attachChipsForTurn(row, 'AGENT');
   } catch (err) {
     removeTypingIndicator();
     showError('Network error -- is the server running?');
@@ -392,7 +412,6 @@ switchDriverBtn.addEventListener('click', () => {
   updateDriverBadge();
   clearError();
   setEscalated(false);
-  chipsEl.classList.remove('show');
   showIdGateGreeting();
   msgEl.focus();
 });
@@ -403,6 +422,7 @@ form.addEventListener('submit', async (e) => {
   if (!text) return;
 
   clearError();
+  removeInlineChips();
   addMessage('DRIVER', text);
   msgEl.value = '';
   msgEl.style.height = 'auto';
